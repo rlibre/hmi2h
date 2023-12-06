@@ -272,7 +272,8 @@ class HMIComponent {
 						case 'filter_m':case 'txt_m':		case 'insert':
 						case 'delete':	case 'clear':		case 'maxval_y':
 						case 'val_y':	case 'maxval_x':	case 'val_x':
-						case 'leftshow':case 'drastate': {
+						case 'leftshow':case 'drastate': 	case 'disup': 
+						case 'objHig': {
 // clang-format on
 							switch( size-16 ) {
 								case 1:	

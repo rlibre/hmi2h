@@ -4,7 +4,7 @@
   "main": "index.js",
   "license": "MIT",
   "scripts": {
-    "build": "esbuild --outfile=bin/main.js --sourcemap --watch --format=iife --bundle --minify --platform=node src/main.ts"
+    "build": "esbuild --outfile=bin/hmi2h.js --sourcemap --watch --format=iife --bundle --minify --platform=node src/main.ts"
   },
   "dependencies": {
     "@types/node": "^20.10.3",

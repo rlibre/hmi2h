@@ -11,8 +11,8 @@
 			"skipFiles": [
 				"<node_internals>/**"
 			],
-			"program": "${workspaceFolder}/bin/main.js",
-			"args": ["C:/dev/aquavie/code/display/osmopur-ml3.HMI", "-o", "C:/dev/aquavie/code/esp/main/pages/ids.h"]
+			"program": "${workspaceFolder}/bin/hmi2h.js",
+			"args": ["example/mk4duo_7_0_intelligent_v1_3_2.HMI", "-o", "example/ids.h"]
 			//"args": ["C:/dev/aquavie/code/display/zz.HMI", "-o", "ids.h"]
 		}
 	]
