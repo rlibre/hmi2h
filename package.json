@@ -4,9 +4,10 @@
   "main": "index.js",
   "license": "MIT",
   "scripts": {
-	"build": "esbuild --outfile=bin/main.js --sourcemap --watch --format=iife --bundle --platform=node src/main.ts"
+    "build": "esbuild --outfile=bin/main.js --sourcemap --watch --format=iife --bundle --minify --platform=node src/main.ts"
   },
   "dependencies": {
-    "@types/node": "^20.10.3"
+    "@types/node": "^20.10.3",
+    "commander": "^11.1.0"
   }
 }

@@ -2,6 +2,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 
 import { ObjTypes } from './types.js';
+import { program } from "commander";
 
 
 const ascii_decoder = new TextDecoder( "ascii" );
@@ -19,8 +20,13 @@ class Reader {
 		this.offset = 0;
 	}
 
-	seek( offset: number ) {
-		this.offset = offset;
+	seek( offset: number, from = 0 ) {
+		if( from==0 ) {
+			this.offset = offset;
+		}
+		else {
+			this.offset += offset;
+		}
 	}
 
 	readBool( ): boolean {
@@ -134,6 +140,10 @@ class HMIPageHeader {
 	locked: boolean;
 	version: number;
 	name: string;
+	u1: number;
+	u2: number;
+	u3: number;
+	u4: Uint8Array;
 
 	catalog: HMIPageCatalog[];
 
@@ -143,15 +153,16 @@ class HMIPageHeader {
 
 		this.crc = reader.readI32( );
 		this.size = reader.readI32( );
-		reader.readI32( );// header size
+		this.u1 = reader.readI32( );// header size
 		this.count = reader.readI32( );
 		this.password = reader.readI32( );
 		this.locked = reader.readBool( );
-		reader.readI8( ); //?
+		this.u2 = reader.readI8( ); //?
 		this.version = reader.readI8( );
-		reader.readI8( ); //?
+		this.u3 = reader.readI8( ); //?
 		this.name = reader.readStr( 16 ); //
-		reader.readBuf( 16 ); //?
+		this.u4 = reader.readBuf( 16 ); //?
+		
 
 		this.catalog = [];
 		const self_base = offset+24+16+16;
@@ -175,8 +186,7 @@ class HMIComponent {
 
 		const vals: Record<string,any> = {};
 		
-		let index = 0;
-		while( index<cat.size ) {
+		while( 1 ) {
 	
 			// list is closed by a 0 sized element
 			const size = reader.readI32( );
@@ -186,9 +196,7 @@ class HMIComponent {
 
 			// read a root item
 			const ns = reader.readStr( size );
-			index += 4;
-			index += size;
-
+		
 			// name-count -> the elment name with sub element count saved in a string.
 			const [name,sc] = ns.split( '-' );
 			const count = parseInt(sc);
@@ -200,7 +208,7 @@ class HMIComponent {
 			const is_code = name.startsWith("codes");
 			const is_att = name=="att";
 			
-			for( let i=0; i<count; i++ && index<cat.size ) {
+			for( let i=0; i<count; i++ ) {
 				const size = reader.readI32( );
 				
 				// in case of code, lines are stored directly
@@ -212,7 +220,6 @@ class HMIComponent {
 				else {
 					const pname = reader.readStr( 16 );
 
-					//console.log( pname, size );
 					let value: any;
 					
 					switch( pname ) {
@@ -265,7 +272,7 @@ class HMIComponent {
 						case 'filter_m':case 'txt_m':		case 'insert':
 						case 'delete':	case 'clear':		case 'maxval_y':
 						case 'val_y':	case 'maxval_x':	case 'val_x':
-						case 'leftshow': {
+						case 'leftshow':case 'drastate': {
 // clang-format on
 							switch( size-16 ) {
 								case 1:	
@@ -286,13 +293,14 @@ class HMIComponent {
 							}
 
 							if( value==0 ) {
-								continue;
+								//continue;
 							}
 
 							break;
 						}
 						
 						default: {
+							console.log( "unknown attribute name:", pname )
 							debugger;
 							break;
 						}
@@ -316,9 +324,6 @@ class HMIComponent {
 						data[pname] = value;
 					}
 				}
-
-				index += 4;
-				index += size;
 			}
 
 			if( is_code ) {
@@ -345,22 +350,49 @@ class HMIPage {
 
 		const header = new HMIPageHeader( );
 		header.read( reader, cat.offset );
+		//console.log( cat.name, header );
 
 		const components = header.catalog.map( x => {
 			const com = new HMIComponent( );
 			return com.read( reader, x );
 		} );
 
-		let page = {};
+		let page: any = {};
 		if( components[0].type=='page' ) {
 			page = components.shift( );
 		}
+
+		page.offset = cat.offset;
 
 		return {
 			header: page,
 			components
 		};
 	}
+}
+
+class HMIMain {
+
+	read( reader: Reader, cat: HMICatalog ) {
+
+		// 
+		reader.seek( cat.offset+0x1c );
+		const count = reader.readI32( );
+		const memalloc = reader.readI32( );
+		reader.seek( 0x3c, 1 );
+
+		const order: Record<string,string>[ ] = [];
+
+		for( let i=0; i<count; i++ ) {
+			const type = reader.readStr( 8 );
+			const file = reader.readStr( 8 );
+
+			order.push( {type,file} )
+		}
+
+		return order;
+	}
+
 }
 
 /**
@@ -387,12 +419,21 @@ class HMIFile {
 			return x.name=="main.HMI";
 		})
 
+		const m = new HMIMain( );
+		const order = m.read( reader, main ).filter( p => p.type=='pa' );;
+		//console.log( order );
+		
 		// extract pages
 		const pges = catalog.filter( x => isPage(x.name) );
 		const pages = pges.map( x => {
 			const pge = new HMIPage( );
-			return pge.read( reader, x );
+			const res = pge.read( reader, x );
+
+			res.header.id = order.findIndex( p => p.file==x.name );
+			return res;
 		})
+
+		pages.sort( (a, b) => a.header.id-b.header.id );
 
 		return {
 			main,
@@ -408,13 +449,14 @@ function gen_c_headers( content, output ) {
 
 	const code: string[] = [];
 
-	content.pages.forEach( (p,id) => {
+	content.pages.forEach( (p) => {
 		const pname: string = p.header.objname.toUpperCase();
-		code.push( `#define\tPAGE_${pname} ${id+1}` );
+		code.push( `#define\tPAGE_ID_${pname} ${p.header.id}` );
 
 		p.components.forEach( c=> {
 			const cname: string = c.objname.toUpperCase();
-			code.push( `#define\t\tPAGE_${pname}_${cname} ${c.id+1}   // ${c.type}` );
+			code.push( `#define\t\tPAGE_${pname}_${cname} ${c.id}   // ${c.type}` );
+			code.push( `#define\t\tPAGE_${pname}_${cname}_NAME "${c.objname}"` );
 		})
 
 		code.push("");
@@ -427,7 +469,7 @@ function gen_c_headers( content, output ) {
 
 
 
-function main( input: string ) {
+function main( input: string, options: any ) {
 
 	const data = fs.readFileSync( input );
 	const reader = new Reader( data );
@@ -435,19 +477,25 @@ function main( input: string ) {
 	const hmiHeader = new HMIFile( );
 	const content = hmiHeader.read( reader );
 
-	const output = input.replace( /\.hmi$/, '.h' );
+	const output = options.output ?? input.replace( /\.hmi$/i, '' )+".h";
 	gen_c_headers( content, output );
 
 	// write extraction
 	//fs.writeFileSync( "out/pages.json", JSON.stringify(content,undefined,4));
 }
 
-if( process.argv.length>=2 ) {
-	main( process.argv[2] );
-}
-else {
-	console.error( "expected .hmi filename." );
-}
+
+
+program
+	.version('1.0')
+	.description('Extract c header from nextion hmi file')
+	.arguments('<path>')
+	.option('-o, --output [output]', 'Output file name', null)
+	.action( function(path,options) {
+		main( path, options );
+	})
+
+program.parse(process.argv);
 
 
 
